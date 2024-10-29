@@ -1,0 +1,55 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - 5672:5672
+      - 15672:15672
+    volumes:
+      - ./volumes/rabbitmq/data/:/var/lib/rabbitmq/
+      - ./volumes/rabbitmq/log/:/var/log/rabbitmq
+
+  postgres_wireguard_proxy:
+    image: postgres:latest
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: wg_proxy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./volumes/postgres:/var/lib/postgresql/data
+
+  wireguard_proxy:
+    build:
+      context: .
+      dockerfile: ./wireguard-proxy/Dockerfile
+    ports:
+      - "51871:51871/udp"
+      - "9229:9229"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv4.ip_forward=1
+    depends_on:
+      postgres_wireguard_proxy:
+        condition: service_healthy
+      wireguard_proxy_migrations:
+        condition: service_completed_successfully
+    restart: always
+
+  wireguard_proxy_migrations:
+    build:
+      context: .
+      dockerfile: ./wireguard-proxy/migrations.Dockerfile
+    depends_on:
+      postgres_wireguard_proxy:
+        condition: service_healthy
